@@ -1,4 +1,3 @@
-%%writefile main.py
 import os
 import math
 import torch
