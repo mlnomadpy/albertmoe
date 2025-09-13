@@ -1,0 +1,186 @@
+"""
+Core model components for AlbertMoE.
+"""
+
+import torch
+import torch.nn as nn
+from torch.nn import functional as F
+
+
+class RotaryEmbedding(nn.Module):
+    def __init__(self, dim, max_seq_len=512):
+        super().__init__()
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer("inv_freq", inv_freq)
+        self.max_seq_len = max_seq_len
+
+        t = torch.arange(self.max_seq_len, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
+        freqs = torch.einsum("i,j->ij", t, self.inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        self.register_buffer("cos_cached", emb.cos()[None, None, :, :])
+        self.register_buffer("sin_cached", emb.sin()[None, None, :, :])
+
+    def forward(self, x):
+        seq_len = x.shape[2]
+        return (
+            self.cos_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
+            self.sin_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
+        )
+
+
+def rotate_half(x):
+    x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def apply_rotary_pos_emb(q, k, cos, sin):
+    q_emb = (q * cos) + (rotate_half(q) * sin)
+    k_emb = (k * cos) + (rotate_half(k) * sin)
+    return q_emb, k_emb
+
+
+class Expert(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.linear1 = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
+        self.linear2 = nn.Linear(config.intermediate_size, config.hidden_size, bias=False)
+        self.gelu = nn.GELU()
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+    def forward(self, x):
+        return self.dropout(self.linear2(self.gelu(self.linear1(x))))
+
+
+class MoE(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.num_experts = config.num_experts
+        self.top_k_experts = getattr(config, 'top_k_experts', 2)  # Default to 2 if not specified
+        self.experts = nn.ModuleList([Expert(config) for _ in range(self.num_experts)])
+        self.gate = nn.Linear(config.hidden_size, self.num_experts, bias=False)
+
+    def forward(self, x):
+        batch_size, seq_len, hidden_size = x.shape
+        num_tokens = batch_size * seq_len
+        x = x.view(-1, hidden_size)
+        
+        router_logits = self.gate(x)
+        routing_weights, selected_experts = torch.topk(
+            F.softmax(router_logits, dim=1, dtype=torch.float), 
+            self.top_k_experts, 
+            dim=-1
+        )
+        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        
+        expert_counts = F.one_hot(selected_experts, num_classes=self.num_experts).sum(dim=1).sum(dim=0)
+        f_i = expert_counts / num_tokens
+        P_i = router_logits.softmax(dim=-1).mean(dim=0)
+        aux_loss = self.num_experts * (f_i * P_i).sum()
+        
+        final_hidden_states = torch.zeros_like(x)
+        
+        flat_selected_experts = selected_experts.view(-1)
+        
+        for i, expert in enumerate(self.experts):
+            expert_mask = (flat_selected_experts == i)
+            flat_expert_indices = expert_mask.nonzero(as_tuple=True)[0]
+            
+            if flat_expert_indices.numel() == 0:
+                continue
+            
+            expert_indices = flat_expert_indices // self.top_k_experts
+            tokens_for_expert = x[expert_indices]
+            expert_output = expert(tokens_for_expert)
+            weights_for_expert = routing_weights.view(-1)[expert_mask]
+            
+            final_hidden_states.index_add_(
+                0, expert_indices, 
+                expert_output * weights_for_expert.unsqueeze(1).to(x.dtype)
+            )
+
+        return final_hidden_states.view(batch_size, seq_len, hidden_size), aux_loss
+
+
+class AlbertEmbeddings(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.word_embeddings = nn.Embedding(config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id)
+        self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.embedding_size)
+        
+        # Project from embedding_size to hidden_size
+        self.embedding_hidden_mapping_in = nn.Linear(config.embedding_size, config.hidden_size)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        
+        self.register_buffer("token_type_ids", torch.zeros((1, config.max_position_embeddings), dtype=torch.long), persistent=False)
+
+    def forward(self, input_ids, token_type_ids=None):
+        seq_length = input_ids.size(1)
+        
+        if token_type_ids is None:
+            token_type_ids = self.token_type_ids[:, :seq_length].expand(input_ids.shape[0], -1)
+        
+        inputs_embeds = self.word_embeddings(input_ids)
+        token_type_embeddings = self.token_type_embeddings(token_type_ids)
+        
+        embeddings = inputs_embeds + token_type_embeddings
+        
+        # Project to hidden size
+        projected_embeddings = self.embedding_hidden_mapping_in(embeddings)
+        embeddings = self.LayerNorm(projected_embeddings)
+        embeddings = self.dropout(embeddings)
+        return embeddings
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.num_heads = config.num_attention_heads
+        self.head_dim = config.hidden_size // self.num_heads
+        assert config.hidden_size % self.num_heads == 0, "Hidden size must be divisible by num_heads"
+        self.qkv_layer = nn.Linear(config.hidden_size, 3 * config.hidden_size, bias=False)
+        self.output_proj = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
+        self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+        self.rotary_emb = RotaryEmbedding(self.head_dim, config.max_position_embeddings)
+
+    def forward(self, x, attention_mask=None):
+        batch_size, seq_len, hidden_size = x.size()
+        qkv = self.qkv_layer(x)
+        qkv = qkv.reshape(batch_size, seq_len, self.num_heads, 3 * self.head_dim).permute(0, 2, 1, 3)
+        q, k, v = qkv.chunk(3, dim=-1)
+        
+        cos, sin = self.rotary_emb(v)
+        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+        
+        scale = (self.head_dim ** 0.5)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / scale
+
+        if attention_mask is not None:
+            scores = scores + attention_mask
+
+        attention_weights = F.softmax(scores, dim=-1)
+        attention_weights = self.dropout(attention_weights)
+        context = torch.matmul(attention_weights, v)
+        
+        context = context.permute(0, 2, 1, 3).contiguous()
+        context = context.view(batch_size, seq_len, hidden_size)
+        output = self.output_proj(context)
+        return output
+
+
+class AlbertLayer(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.attention = MultiHeadAttention(config)
+        self.ffn = MoE(config)
+        self.norm1 = nn.LayerNorm(config.hidden_size)
+        self.norm2 = nn.LayerNorm(config.hidden_size)
+        self.dropout1 = nn.Dropout(config.hidden_dropout_prob)
+        self.dropout2 = nn.Dropout(config.hidden_dropout_prob)
+
+    def forward(self, x, attention_mask=None):
+        attn_output = self.attention(x, attention_mask)
+        x = self.norm1(x + self.dropout1(attn_output))
+        ffn_output, aux_loss = self.ffn(x)
+        x = self.norm2(x + self.dropout2(ffn_output))
+        return x, aux_loss
