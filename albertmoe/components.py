@@ -106,7 +106,10 @@ class AlbertEmbeddings(nn.Module):
         super().__init__()
         self.word_embeddings = nn.Embedding(config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.embedding_size)
-        self.LayerNorm = nn.LayerNorm(config.embedding_size, eps=config.layer_norm_eps)
+        
+        # Project from embedding_size to hidden_size
+        self.embedding_hidden_mapping_in = nn.Linear(config.embedding_size, config.hidden_size)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         
         self.register_buffer("token_type_ids", torch.zeros((1, config.max_position_embeddings), dtype=torch.long), persistent=False)
@@ -121,7 +124,10 @@ class AlbertEmbeddings(nn.Module):
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
         
         embeddings = inputs_embeds + token_type_embeddings
-        embeddings = self.LayerNorm(embeddings)
+        
+        # Project to hidden size
+        projected_embeddings = self.embedding_hidden_mapping_in(embeddings)
+        embeddings = self.LayerNorm(projected_embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
 
@@ -129,78 +135,52 @@ class AlbertEmbeddings(nn.Module):
 class MultiHeadAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.num_attention_heads = config.num_attention_heads
-        self.attention_head_size = config.hidden_size // config.num_attention_heads
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
-        
-        self.query = nn.Linear(config.hidden_size, self.all_head_size, bias=False)
-        self.key = nn.Linear(config.hidden_size, self.all_head_size, bias=False)
-        self.value = nn.Linear(config.hidden_size, self.all_head_size, bias=False)
-        
+        self.num_heads = config.num_attention_heads
+        self.head_dim = config.hidden_size // self.num_heads
+        assert config.hidden_size % self.num_heads == 0, "Hidden size must be divisible by num_heads"
+        self.qkv_layer = nn.Linear(config.hidden_size, 3 * config.hidden_size, bias=False)
+        self.output_proj = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
-        self.use_rotary = getattr(config, 'use_rotary', True)
-        
-        if self.use_rotary:
-            rotary_dim = getattr(config, 'rotary_dim', self.attention_head_size)
-            self.rotary_emb = RotaryEmbedding(rotary_dim, config.max_position_embeddings)
+        self.rotary_emb = RotaryEmbedding(self.head_dim, config.max_position_embeddings)
 
-    def transpose_for_scores(self, x):
-        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
-        x = x.view(new_x_shape)
-        return x.permute(0, 2, 1, 3)
+    def forward(self, x, attention_mask=None):
+        batch_size, seq_len, hidden_size = x.size()
+        qkv = self.qkv_layer(x)
+        qkv = qkv.reshape(batch_size, seq_len, self.num_heads, 3 * self.head_dim).permute(0, 2, 1, 3)
+        q, k, v = qkv.chunk(3, dim=-1)
+        
+        cos, sin = self.rotary_emb(v)
+        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+        
+        scale = (self.head_dim ** 0.5)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / scale
 
-    def forward(self, hidden_states, attention_mask=None, output_attentions=False):
-        query_layer = self.transpose_for_scores(self.query(hidden_states))
-        key_layer = self.transpose_for_scores(self.key(hidden_states))
-        value_layer = self.transpose_for_scores(self.value(hidden_states))
-        
-        if self.use_rotary:
-            cos, sin = self.rotary_emb(query_layer)
-            query_layer, key_layer = apply_rotary_pos_emb(query_layer, key_layer, cos, sin)
-        
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-        attention_scores = attention_scores / (self.attention_head_size ** 0.5)
-        
         if attention_mask is not None:
-            attention_scores = attention_scores + attention_mask
+            scores = scores + attention_mask
+
+        attention_weights = F.softmax(scores, dim=-1)
+        attention_weights = self.dropout(attention_weights)
+        context = torch.matmul(attention_weights, v)
         
-        attention_probs = nn.functional.softmax(attention_scores, dim=-1)
-        attention_probs = self.dropout(attention_probs)
-        
-        context_layer = torch.matmul(attention_probs, value_layer)
-        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
-        context_layer = context_layer.view(new_context_layer_shape)
-        
-        outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
-        return outputs
+        context = context.permute(0, 2, 1, 3).contiguous()
+        context = context.view(batch_size, seq_len, hidden_size)
+        output = self.output_proj(context)
+        return output
 
 
 class AlbertLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.attention = MultiHeadAttention(config)
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        
-        self.moe = MoE(config)
-        self.ffn_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.ffn = MoE(config)
+        self.norm1 = nn.LayerNorm(config.hidden_size)
+        self.norm2 = nn.LayerNorm(config.hidden_size)
+        self.dropout1 = nn.Dropout(config.hidden_dropout_prob)
+        self.dropout2 = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, hidden_states, attention_mask=None, output_attentions=False):
-        attention_outputs = self.attention(hidden_states, attention_mask, output_attentions)
-        attention_output = attention_outputs[0]
-        
-        attention_output = self.dense(attention_output)
-        attention_output = self.dropout(attention_output)
-        hidden_states = self.LayerNorm(attention_output + hidden_states)
-        
-        # MoE FFN
-        moe_output, aux_loss = self.moe(hidden_states)
-        hidden_states = self.ffn_layernorm(hidden_states + moe_output)
-        
-        outputs = (hidden_states, aux_loss)
-        if output_attentions:
-            outputs = outputs + (attention_outputs[1],)
-        
-        return outputs
+    def forward(self, x, attention_mask=None):
+        attn_output = self.attention(x, attention_mask)
+        x = self.norm1(x + self.dropout1(attn_output))
+        ffn_output, aux_loss = self.ffn(x)
+        x = self.norm2(x + self.dropout2(ffn_output))
+        return x, aux_loss

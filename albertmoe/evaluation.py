@@ -3,8 +3,18 @@ Evaluation utilities for AlbertMoE models.
 """
 
 import os
-import wandb
-from mteb import MTEB, get_tasks
+
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
+try:
+    from mteb import MTEB, get_tasks
+    MTEB_AVAILABLE = True
+except ImportError:
+    MTEB_AVAILABLE = False
 
 from .models import SentenceAlbert
 from .config import AlbertMoEConfig
@@ -27,6 +37,9 @@ class MTEBEvaluator:
             custom_tasks: List of custom task names
             output_folder: Output folder for results
         """
+        if not MTEB_AVAILABLE:
+            raise ImportError("MTEB is not installed. Install with: pip install mteb")
+            
         if eval_tasks == "basic":
             task_list = ["STSBenchmark"]
         elif eval_tasks == "comprehensive":
@@ -67,7 +80,7 @@ class MTEBEvaluator:
                             if isinstance(value, (int, float)):
                                 all_logged_metrics[f"eval/{task_name}/{split_name}/{metric_name}"] = value
         
-        if all_logged_metrics and wandb.run is not None:
+        if all_logged_metrics and WANDB_AVAILABLE and wandb.run is not None:
             wandb.log(all_logged_metrics)
             print(f"✅ Logged {len(all_logged_metrics)} metrics to W&B.")
         
@@ -90,7 +103,7 @@ def evaluate_model(model_path, task_type="clm", eval_tasks="basic", custom_tasks
     config = AlbertMoEConfig()
     
     # Initialize W&B if requested
-    if use_wandb and wandb.run is None:
+    if use_wandb and WANDB_AVAILABLE and wandb.run is None:
         wandb.init(
             project=wandb_project or "albert-moe-eval",
             name=f"evaluate-{os.path.basename(model_path)}",
@@ -109,7 +122,7 @@ def evaluate_model(model_path, task_type="clm", eval_tasks="basic", custom_tasks
     if use_wandb:
         evaluator.log_results_to_wandb(results)
     
-    if wandb.run is not None:
+    if WANDB_AVAILABLE and wandb.run is not None:
         wandb.finish()
     
     return results

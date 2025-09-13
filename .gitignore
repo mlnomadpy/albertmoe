@@ -1,3 +1,9 @@
+# AlbertMoE specific
+results/
+*.bin
+*.safetensors
+wandb/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

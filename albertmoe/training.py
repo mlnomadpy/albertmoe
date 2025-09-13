@@ -4,13 +4,18 @@ Training utilities for AlbertMoE models.
 
 import os
 import argparse
-import wandb
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from datasets import load_dataset
 from transformers import AutoTokenizer, DataCollatorForLanguageModeling
 import transformers
+
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
 
 from .config import AlbertMoEConfig
 from .models import AlbertForCausalLM, AlbertForMaskedLM
@@ -72,7 +77,7 @@ class BaseTrainer:
                 total_mlm_loss += outputs["mlm_loss"].item()
             
             # Log to wandb
-            if use_wandb and step % 100 == 0:
+            if use_wandb and step % 100 == 0 and WANDB_AVAILABLE:
                 log_dict = {
                     "train/loss": loss.item(),
                     "train/aux_loss": outputs["aux_loss"].item(),

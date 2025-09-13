@@ -40,3 +40,6 @@ class AlbertMoEConfig:
     def __post_init__(self):
         if self.rotary_dim is None:
             self.rotary_dim = self.hidden_size // self.num_attention_heads
+        # Ensure rotary_dim is even for proper rotation
+        if self.rotary_dim % 2 != 0:
+            self.rotary_dim = self.rotary_dim - 1
