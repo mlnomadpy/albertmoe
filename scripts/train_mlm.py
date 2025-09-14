@@ -119,6 +119,45 @@ def main():
         )
         print("✅ Evaluation completed!")
     
+    if args.mode == "serve":
+        # Serving mode
+        print("🚀 Starting MLM serving mode...")
+        
+        # Create trainer for serving
+        trainer = MLMTrainer.create_trainer(args)
+        
+        # Load the trained model
+        if not trainer.load_for_serving(args.model_path):
+            print("❌ Failed to load model for serving. Please check the model path.")
+            return
+        
+        if args.interactive:
+            # Interactive serving
+            trainer.serve_interactive(args)
+        else:
+            # Single prediction mode
+            if args.input_text:
+                print(f"🎯 Input: {args.input_text}")
+                print("🔄 Predicting masked tokens...")
+                
+                results = trainer.predict_masked_tokens(args.input_text, top_k=5)
+                
+                if isinstance(results, str):
+                    print(results)
+                else:
+                    print(f"📝 Original text: {args.input_text}")
+                    print(f"🎯 Predictions:")
+                    
+                    for i, result in enumerate(results):
+                        print(f"\n   Mask #{i+1} (position {result['position']}):")
+                        for pred in result['predictions']:
+                            print(f"      {pred['rank']}. '{pred['token']}' "
+                                f"(probability: {pred['probability']:.3f})")
+            else:
+                print("⚠️  Please provide --input_text for non-interactive serving mode.")
+                print("💡 Or use --interactive flag for interactive mode.")
+                print("💡 Example: --input_text 'The weather is [MASK] today.'")
+    
     print("\n🎉 SCRIPT EXECUTION COMPLETE")
 
 

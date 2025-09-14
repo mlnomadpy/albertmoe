@@ -179,6 +179,23 @@ class BaseTrainer:
             "aux_loss": total_aux_loss / num_steps
         }
 
+    def load_for_serving(self, model_path):
+        """Load a trained model for serving/inference."""
+        try:
+            model_file = os.path.join(model_path, "pytorch_model.bin")
+            if os.path.exists(model_file):
+                state_dict = torch.load(model_file, map_location=self.device)
+                self.model.load_state_dict(state_dict)
+                self.model.eval()
+                print(f"✅ Model loaded from {model_path}")
+                return True
+            else:
+                print(f"✗ Model file not found at {model_file}")
+                return False
+        except Exception as e:
+            print(f"✗ Error loading model: {e}")
+            return False
+
 
 class CLMTrainer(BaseTrainer):
     """Trainer for Causal Language Modeling."""
@@ -225,6 +242,89 @@ class CLMTrainer(BaseTrainer):
     def get_data_collator(self):
         """Get data collator for CLM."""
         return DataCollatorForLanguageModeling(tokenizer=self.tokenizer, mlm=False)
+
+    def generate_text(self, prompt, max_length=100, temperature=1.0, top_k=50, top_p=0.95):
+        """Generate text given a prompt using the CLM model."""
+        self.model.eval()
+        with torch.no_grad():
+            # Tokenize prompt
+            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+            input_ids = inputs["input_ids"]
+            
+            # Generate tokens one by one
+            for _ in range(max_length - input_ids.size(1)):
+                outputs = self.model(input_ids)
+                logits = outputs["logits"]
+                
+                # Get logits for the last token
+                last_token_logits = logits[0, -1, :] / temperature
+                
+                # Apply top-k and top-p filtering
+                if top_k > 0:
+                    top_k_logits, top_k_indices = torch.topk(last_token_logits, top_k)
+                    filtered_logits = torch.full_like(last_token_logits, float('-inf'))
+                    filtered_logits[top_k_indices] = top_k_logits
+                    last_token_logits = filtered_logits
+                
+                if top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(last_token_logits, descending=True)
+                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
+                    sorted_indices_to_remove[0] = 0
+                    indices_to_remove = sorted_indices[sorted_indices_to_remove]
+                    last_token_logits[indices_to_remove] = float('-inf')
+                
+                # Sample next token
+                probs = F.softmax(last_token_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                
+                # Stop if EOS token is generated
+                if next_token.item() == self.tokenizer.eos_token_id:
+                    break
+                
+                # Append token to input
+                input_ids = torch.cat([input_ids, next_token.unsqueeze(0)], dim=-1)
+            
+            # Decode the generated text
+            generated_text = self.tokenizer.decode(input_ids[0], skip_special_tokens=True)
+            return generated_text
+
+    def serve_interactive(self, args):
+        """Interactive serving mode for CLM."""
+        print("🤖 AlbertMoE CLM Interactive Serving Mode")
+        print("=" * 50)
+        print("Enter text prompts to generate completions.")
+        print("Type 'quit' or 'exit' to stop.\n")
+        
+        while True:
+            try:
+                prompt = input("🎯 Enter your prompt: ").strip()
+                if prompt.lower() in ['quit', 'exit', 'q']:
+                    print("👋 Goodbye!")
+                    break
+                
+                if not prompt:
+                    print("⚠️  Please enter a non-empty prompt.")
+                    continue
+                
+                print("🔄 Generating...")
+                generated = self.generate_text(
+                    prompt, 
+                    max_length=args.gen_max_length, 
+                    temperature=args.temperature,
+                    top_k=args.top_k, 
+                    top_p=args.top_p
+                )
+                
+                print(f"📝 Generated text:\n{generated}\n")
+                print("-" * 50)
+                
+            except KeyboardInterrupt:
+                print("\n👋 Goodbye!")
+                break
+            except Exception as e:
+                print(f"❌ Error during generation: {e}")
 
 
 class MLMTrainer(BaseTrainer):
@@ -277,6 +377,98 @@ class MLMTrainer(BaseTrainer):
             mlm_probability=0.15
         )
 
+    def predict_masked_tokens(self, text, top_k=5):
+        """Predict masked tokens in the given text."""
+        self.model.eval()
+        with torch.no_grad():
+            # Check if text contains [MASK] tokens
+            if "[MASK]" not in text:
+                return f"⚠️  No [MASK] tokens found in text. Please include [MASK] tokens to predict."
+            
+            # Tokenize the text
+            inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+            input_ids = inputs["input_ids"]
+            
+            # Find mask token positions
+            mask_token_id = self.tokenizer.mask_token_id
+            mask_positions = (input_ids == mask_token_id).nonzero(as_tuple=True)
+            
+            if len(mask_positions[1]) == 0:
+                return f"⚠️  No [MASK] tokens found after tokenization."
+            
+            # Get model predictions
+            outputs = self.model(input_ids)
+            logits = outputs["logits"]
+            
+            results = []
+            for pos in mask_positions[1]:
+                # Get predictions for this mask position
+                mask_logits = logits[0, pos, :]
+                top_predictions = torch.topk(mask_logits, top_k)
+                
+                # Decode top predictions
+                predictions = []
+                for i, (score, token_id) in enumerate(zip(top_predictions.values, top_predictions.indices)):
+                    token = self.tokenizer.decode([token_id], skip_special_tokens=True)
+                    probability = F.softmax(mask_logits, dim=-1)[token_id].item()
+                    predictions.append({
+                        'rank': i + 1,
+                        'token': token,
+                        'probability': probability,
+                        'score': score.item()
+                    })
+                
+                results.append({
+                    'position': pos.item(),
+                    'predictions': predictions
+                })
+            
+            return results
+
+    def serve_interactive(self, args):
+        """Interactive serving mode for MLM."""
+        print("🤖 AlbertMoE MLM Interactive Serving Mode")
+        print("=" * 50)
+        print("Enter text with [MASK] tokens to predict masked words.")
+        print("Type 'quit' or 'exit' to stop.\n")
+        
+        print("💡 Example: 'The weather today is [MASK] and [MASK].'")
+        print("💡 Note: Use [MASK] (not <mask>) as the mask token.\n")
+        
+        while True:
+            try:
+                text = input("🎯 Enter text with [MASK] tokens: ").strip()
+                if text.lower() in ['quit', 'exit', 'q']:
+                    print("👋 Goodbye!")
+                    break
+                
+                if not text:
+                    print("⚠️  Please enter non-empty text.")
+                    continue
+                
+                print("🔄 Predicting masked tokens...")
+                results = self.predict_masked_tokens(text, top_k=5)
+                
+                if isinstance(results, str):
+                    print(results)
+                else:
+                    print(f"📝 Original text: {text}")
+                    print(f"🎯 Predictions:")
+                    
+                    for i, result in enumerate(results):
+                        print(f"\n   Mask #{i+1} (position {result['position']}):")
+                        for pred in result['predictions']:
+                            print(f"      {pred['rank']}. '{pred['token']}' "
+                                f"(probability: {pred['probability']:.3f})")
+                
+                print("\n" + "-" * 50)
+                
+            except KeyboardInterrupt:
+                print("\n👋 Goodbye!")
+                break
+            except Exception as e:
+                print(f"❌ Error during prediction: {e}")
+
 
 def get_common_parser():
     """Get argument parser with common training arguments."""
@@ -284,7 +476,7 @@ def get_common_parser():
     
     # Mode selection
     mode_group = parser.add_argument_group('Mode Selection')
-    mode_group.add_argument("--mode", type=str, default="all", choices=["pretrain", "evaluate", "all"])
+    mode_group.add_argument("--mode", type=str, default="all", choices=["pretrain", "evaluate", "serve", "all"])
     mode_group.add_argument("--model_path", type=str, default="./albert_from_scratch_output")
     mode_group.add_argument("--task_type", type=str, choices=["clm", "mlm"], required=True)
 
@@ -351,5 +543,20 @@ def get_common_parser():
                           help="Create a private repository on the Hub.")
     hub_group.add_argument("--hub_commit_message", type=str, default=None,
                           help="Custom commit message for Hub upload.")
+
+    # Serving configuration
+    serving_group = parser.add_argument_group('Serving Configuration')
+    serving_group.add_argument("--interactive", action="store_true", default=False,
+                              help="Enable interactive serving mode with continuous input prompts.")
+    serving_group.add_argument("--input_text", type=str, default=None,
+                              help="Single input text for serving mode (non-interactive).")
+    serving_group.add_argument("--gen_max_length", type=int, default=100,
+                              help="Maximum length for text generation (CLM only).")
+    serving_group.add_argument("--temperature", type=float, default=1.0,
+                              help="Temperature for text generation (CLM only).")
+    serving_group.add_argument("--top_k", type=int, default=50,
+                              help="Top-k sampling for text generation (CLM only).")
+    serving_group.add_argument("--top_p", type=float, default=0.95,
+                              help="Top-p (nucleus) sampling for text generation (CLM only).")
 
     return parser
