@@ -5,6 +5,7 @@ Training utilities for AlbertMoE models.
 import os
 import argparse
 import torch
+from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from datasets import load_dataset
