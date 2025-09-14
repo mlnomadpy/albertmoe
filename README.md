@@ -12,6 +12,7 @@ A modular and production-ready implementation of ALBERT (A Lite BERT) with Mixtu
 - **Rotary Embeddings**: Modern positional encoding for better sequence understanding
 - **MTEB Evaluation**: Built-in support for evaluating sentence embeddings
 - **Weights & Biases Integration**: Comprehensive logging and experiment tracking
+- **🤗 Hugging Face Hub Integration**: Seamless model sharing and collaboration
 
 ## 📦 Installation
 
@@ -46,6 +47,22 @@ python scripts/train_clm.py \
     --use_wandb
 ```
 
+### Training with Hugging Face Hub Integration
+
+```bash
+python scripts/train_clm.py \
+    --mode pretrain \
+    --dataset wikitext \
+    --dataset_config wikitext-2-raw-v1 \
+    --num_epochs 3 \
+    --batch_size 8 \
+    --hidden_size 768 \
+    --num_experts 8 \
+    --push_to_hub username/my-albert-moe \
+    --hub_token your_hf_token \
+    --use_wandb
+```
+
 ### Training a Masked Language Model (MLM)
 
 ```bash
@@ -63,7 +80,7 @@ python scripts/train_mlm.py \
 ### Using as a Python Library
 
 ```python
-from albertmoe import AlbertMoEConfig, AlbertForCausalLM, ChillAdam
+from albertmoe import AlbertMoEConfig, AlbertForCausalLM, ChillAdam, push_to_hub
 
 # Create configuration
 config = AlbertMoEConfig(
@@ -81,6 +98,15 @@ model = AlbertForCausalLM(config)
 optimizer = ChillAdam(model.parameters())
 
 # Your training loop here...
+
+# Save locally and push to Hub
+push_to_hub(
+    local_path="./my_model",
+    repo_id="username/my-albert-moe",
+    model_config=config.__dict__,
+    task_type="clm",
+    token="your_hf_token"
+)
 ```
 
 ## 🏗️ Architecture
@@ -148,6 +174,77 @@ config = AlbertMoEConfig(
 | `--hidden_size` | Model hidden size | 768 |
 | `--num_experts` | Number of MoE experts | 8 |
 | `--use_wandb` | Enable Weights & Biases logging | False |
+| `--push_to_hub` | Hub repository ID (e.g., 'username/model-name') | None |
+| `--hub_token` | Hugging Face authentication token | None |
+| `--hub_private` | Create private repository on Hub | False |
+
+## 🤗 Hugging Face Hub Integration
+
+AlbertMoE now supports seamless integration with Hugging Face Hub for model sharing and collaboration.
+
+### Automatic Model Upload
+
+Train and automatically upload to Hub:
+
+```bash
+# CLM training with Hub upload
+python scripts/train_clm.py \
+    --push_to_hub username/my-albert-clm \
+    --hub_token your_hf_token \
+    --hub_private  # Optional: create private repo
+
+# MLM training with Hub upload  
+python scripts/train_mlm.py \
+    --push_to_hub username/my-albert-mlm \
+    --hub_token your_hf_token
+```
+
+### Programmatic Hub Integration
+
+```python
+from albertmoe import push_to_hub, AlbertMoEConfig
+
+# After training your model locally
+success = push_to_hub(
+    local_path="./my_trained_model",
+    repo_id="username/my-albert-moe", 
+    model_config=config.__dict__,
+    task_type="clm",  # or "mlm"
+    token="your_hf_token",
+    private=False,
+    commit_message="Upload trained AlbertMoE model"
+)
+```
+
+### Repository Management
+
+The Hub integration automatically:
+
+- **Creates repositories** if they don't exist
+- **Updates existing repositories** with new model versions
+- **Generates model cards** with training details and usage examples
+- **Creates config.json** for model compatibility
+- **Handles authentication** via tokens or environment variables
+
+### Environment Variables
+
+Set your Hugging Face token as an environment variable:
+
+```bash
+export HF_TOKEN="your_hugging_face_token"
+# or
+export HUGGINGFACE_HUB_TOKEN="your_hugging_face_token"
+```
+
+### Generated Model Card
+
+The integration automatically creates comprehensive model cards including:
+
+- Model architecture details
+- Training configuration
+- Usage examples
+- Performance metrics
+- Citation information
 
 ## 🔬 Evaluation
 

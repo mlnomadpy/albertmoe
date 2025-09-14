@@ -55,10 +55,27 @@ def train_mlm_model(trainer, args):
         # Save model
         if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
             save_path = f"{args.model_path}/epoch_{epoch + 1}"
-            os.makedirs(save_path, exist_ok=True)
-            torch.save(trainer.model.state_dict(), f"{save_path}/pytorch_model.bin")
-            trainer.tokenizer.save_pretrained(save_path)
-            print(f"💾 Model saved to {save_path}")
+            
+            # Prepare training args for model card
+            training_args_dict = {
+                "task_type": "mlm",
+                "num_epochs": args.num_epochs,
+                "batch_size": args.batch_size,
+                "dataset": args.dataset,
+                "dataset_config": args.dataset_config,
+                "hidden_size": args.hidden_size,
+                "num_experts": args.num_experts,
+                "top_k_experts": args.top_k_experts,
+                "max_position_embeddings": args.max_position_embeddings,
+            } if args.push_to_hub else None
+            
+            trainer.save_model(
+                save_path=save_path,
+                push_to_hub_repo=args.push_to_hub,
+                hub_token=args.hub_token,
+                hub_private=args.hub_private,
+                training_args=training_args_dict
+            )
     
     if args.use_wandb:
         wandb.finish()

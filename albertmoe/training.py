@@ -20,6 +20,7 @@ except ImportError:
 from .config import AlbertMoEConfig
 from .models import AlbertForCausalLM, AlbertForMaskedLM
 from .optimizers import ChillAdam
+from .hub_utils import push_to_hub
 
 # Set the transformers logger to warning level to suppress step-by-step loss prints
 transformers.logging.set_verbosity_warning()
@@ -44,6 +45,64 @@ class BaseTrainer:
         
         tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=dataset.column_names)
         return tokenized_dataset
+    
+    def save_model(self, save_path, push_to_hub_repo=None, hub_token=None, hub_private=False, training_args=None):
+        """
+        Save model locally and optionally push to Hugging Face Hub.
+        
+        Args:
+            save_path: Local path to save the model
+            push_to_hub_repo: Hub repository ID (e.g., "username/model-name"). If None, only saves locally.
+            hub_token: Hugging Face token for authentication
+            hub_private: Whether to create a private repository on the Hub
+            training_args: Training arguments to include in model card
+        """
+        # Ensure save directory exists
+        os.makedirs(save_path, exist_ok=True)
+        
+        # Save model state dict and tokenizer locally
+        torch.save(self.model.state_dict(), os.path.join(save_path, "pytorch_model.bin"))
+        self.tokenizer.save_pretrained(save_path)
+        
+        print(f"💾 Model saved locally to {save_path}")
+        
+        # Push to Hub if requested
+        if push_to_hub_repo:
+            # Create config dictionary for Hub
+            config_dict = {
+                "architectures": [self.model.__class__.__name__],
+                "model_type": "albert_moe",
+                "vocab_size": self.config.vocab_size,
+                "embedding_size": self.config.embedding_size,
+                "hidden_size": self.config.hidden_size,
+                "num_hidden_layers": self.config.num_hidden_layers,
+                "num_attention_heads": self.config.num_attention_heads,
+                "intermediate_size": self.config.intermediate_size,
+                "num_experts": self.config.num_experts,
+                "top_k_experts": self.config.top_k_experts,
+                "max_position_embeddings": self.config.max_position_embeddings,
+                "aux_loss_coefficient": getattr(self.config, 'aux_loss_coefficient', 0.01),
+                "use_rotary": getattr(self.config, 'use_rotary', True),
+            }
+            
+            # Determine task type based on model class
+            task_type = "clm" if "CausalLM" in self.model.__class__.__name__ else "mlm"
+            
+            # Push to Hub
+            success = push_to_hub(
+                local_path=save_path,
+                repo_id=push_to_hub_repo,
+                model_config=config_dict,
+                task_type=task_type,
+                token=hub_token,
+                private=hub_private,
+                training_args=training_args
+            )
+            
+            if success:
+                print(f"🚀 Model successfully pushed to Hub: https://huggingface.co/{push_to_hub_repo}")
+            else:
+                print(f"❌ Failed to push model to Hub: {push_to_hub_repo}")
     
     def train_epoch(self, dataloader, use_wandb=False):
         """Train for one epoch."""
@@ -253,5 +312,16 @@ def get_common_parser():
     logging_group.add_argument("--use_wandb", action="store_true")
     logging_group.add_argument("--wandb_project", type=str, default="albert-moe")
     logging_group.add_argument("--wandb_name", type=str, default=None)
+
+    # Hugging Face Hub configuration
+    hub_group = parser.add_argument_group('Hugging Face Hub Configuration')
+    hub_group.add_argument("--push_to_hub", type=str, default=None, 
+                          help="Hub repository ID (e.g., 'username/model-name'). If provided, model will be pushed to Hub.")
+    hub_group.add_argument("--hub_token", type=str, default=None,
+                          help="Hugging Face token. If not provided, will try to get from environment variables.")
+    hub_group.add_argument("--hub_private", action="store_true",
+                          help="Create a private repository on the Hub.")
+    hub_group.add_argument("--hub_commit_message", type=str, default=None,
+                          help="Custom commit message for Hub upload.")
 
     return parser
