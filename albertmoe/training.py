@@ -36,14 +36,31 @@ class BaseTrainer:
         self.optimizer = optimizer
         self.device = device
         
-    def prepare_dataset(self, dataset_name, dataset_config, dataset_split, max_length=512):
+    def prepare_dataset(self, dataset_name, dataset_config, dataset_split, max_length=512, streaming=False, max_samples=None, text_column="text"):
         """Prepare dataset for training."""
-        dataset = load_dataset(dataset_name, dataset_config, split=dataset_split)
+        try:
+            # Handle None config (convert to None for datasets library)
+            config_to_use = None if dataset_config and dataset_config.lower() in ['none', 'null', ''] else dataset_config
+            dataset = load_dataset(dataset_name, config_to_use, split=dataset_split, streaming=streaming)
+        except Exception as e:
+            print(f"✗ Error loading dataset {dataset_name}: {e}. Falling back to wikitext.")
+            dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="train", streaming=streaming)
+            text_column = "text"  # Update text column for fallback dataset
         
         def tokenize_function(examples):
-            return self.tokenizer(examples["text"], truncation=True, padding=False, max_length=max_length)
+            return self.tokenizer(examples[text_column], truncation=True, padding=False, max_length=max_length)
         
-        tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=dataset.column_names)
+        if streaming:
+            # For streaming datasets, use map without num_proc and remove_columns from features
+            tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=list(dataset.features.keys()))
+            if max_samples:
+                tokenized_dataset = tokenized_dataset.take(max_samples)
+        else:
+            # For non-streaming datasets, limit samples before tokenization if needed
+            if max_samples:
+                dataset = dataset.select(range(min(max_samples, len(dataset))))
+            tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=dataset.column_names)
+        
         return tokenized_dataset
     
     def save_model(self, save_path, push_to_hub_repo=None, hub_token=None, hub_private=False, training_args=None):
@@ -104,7 +121,7 @@ class BaseTrainer:
             else:
                 print(f"❌ Failed to push model to Hub: {push_to_hub_repo}")
     
-    def train_epoch(self, dataloader, use_wandb=False):
+    def train_epoch(self, dataloader, use_wandb=False, streaming=False, max_samples=None, batch_size=None):
         """Train for one epoch."""
         self.model.train()
         total_loss = 0.0
@@ -135,6 +152,11 @@ class BaseTrainer:
             if "mlm_loss" in outputs and outputs["mlm_loss"] is not None:
                 total_mlm_loss += outputs["mlm_loss"].item()
             
+            # Early stopping for streaming datasets with max_samples
+            if streaming and max_samples and batch_size and (step + 1) * batch_size >= max_samples:
+                print(f"Reached max_samples ({max_samples}) for streaming dataset, stopping training.")
+                break
+            
             # Log to wandb
             if use_wandb and step % 100 == 0 and WANDB_AVAILABLE:
                 log_dict = {
@@ -148,8 +170,8 @@ class BaseTrainer:
                     log_dict["train/mlm_loss"] = outputs["mlm_loss"].item()
                 wandb.log(log_dict)
         
-        # Return average losses
-        num_steps = len(dataloader)
+        # Return average losses (use step+1 for actual number of steps processed)
+        num_steps = step + 1
         return {
             "total_loss": total_loss / num_steps,
             "clm_loss": total_clm_loss / num_steps if total_clm_loss > 0 else None,
@@ -285,6 +307,12 @@ def get_common_parser():
     dataset_group.add_argument("--dataset_config", type=str, default="wikitext-2-raw-v1")
     dataset_group.add_argument("--dataset_split", type=str, default="train")
     dataset_group.add_argument("--tokenizer_name", type=str, default="albert-base-v2")
+    dataset_group.add_argument("--streaming", action="store_true", default=False,
+                              help="Enable dataset streaming for large datasets")
+    dataset_group.add_argument("--max_samples", type=int, default=None,
+                              help="Maximum number of samples to use from dataset")
+    dataset_group.add_argument("--text_column", type=str, default="text",
+                              help="Name of the text column in the dataset")
 
     # Training configuration
     training_group = parser.add_argument_group('Training Configuration')

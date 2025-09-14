@@ -77,6 +77,42 @@ python scripts/train_mlm.py \
     --use_wandb
 ```
 
+### Training with Streaming Datasets 🚀
+
+For large datasets that don't fit in memory, AlbertMoE supports streaming datasets:
+
+```bash
+# Stream a large dataset with memory efficiency
+python scripts/train_clm.py \
+    --mode pretrain \
+    --dataset wikitext \
+    --dataset_config wikitext-103-raw-v1 \
+    --streaming \
+    --max_samples 50000 \
+    --batch_size 8 \
+    --hidden_size 768 \
+    --num_experts 8 \
+    --use_wandb
+```
+
+```bash
+# Stream with custom text column
+python scripts/train_clm.py \
+    --mode pretrain \
+    --dataset squad \
+    --dataset_config plain_text \
+    --text_column context \
+    --streaming \
+    --max_samples 10000 \
+    --batch_size 4
+```
+
+**Benefits of Streaming:**
+- 🔥 Memory efficient - doesn't load entire dataset into RAM
+- ⚡ Faster startup time for large datasets
+- 🎯 Controllable dataset size with `--max_samples`
+- 🌐 Works with any Hugging Face dataset
+
 ### Using as a Python Library
 
 ```python
@@ -173,6 +209,9 @@ config = AlbertMoEConfig(
 | `--num_epochs` | Number of training epochs | 3 |
 | `--hidden_size` | Model hidden size | 768 |
 | `--num_experts` | Number of MoE experts | 8 |
+| `--streaming` | Enable dataset streaming for large datasets | False |
+| `--max_samples` | Maximum number of samples to use from dataset | None |
+| `--text_column` | Name of the text column in the dataset | text |
 | `--use_wandb` | Enable Weights & Biases logging | False |
 | `--push_to_hub` | Hub repository ID (e.g., 'username/model-name') | None |
 | `--hub_token` | Hugging Face authentication token | None |
