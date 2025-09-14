@@ -134,7 +134,27 @@ class SentenceAlbert(nn.Module):
         
         try:
             state_dict = torch.load(model_file, map_location="cpu")
-            self.albert.load_state_dict(state_dict)
+            
+            # Handle the case where the state dict was saved from a full model (e.g., AlbertForCausalLM)
+            # and contains keys with "albert." prefix, but we need to load into just the ALBERT component
+            albert_state_dict = {}
+            albert_prefix = "albert."
+            
+            # Check if state dict has "albert." prefixed keys
+            has_albert_prefix = any(key.startswith(albert_prefix) for key in state_dict.keys())
+            
+            if has_albert_prefix:
+                # Extract only the albert component weights and remove the prefix
+                for key, value in state_dict.items():
+                    if key.startswith(albert_prefix):
+                        # Remove the "albert." prefix
+                        new_key = key[len(albert_prefix):]
+                        albert_state_dict[new_key] = value
+            else:
+                # State dict is already in the expected format (no prefix)
+                albert_state_dict = state_dict
+            
+            self.albert.load_state_dict(albert_state_dict)
         except Exception as e:
             raise ValueError(
                 f"Failed to load model weights from '{model_file}'. "
