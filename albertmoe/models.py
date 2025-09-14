@@ -95,11 +95,52 @@ class SentenceAlbert(nn.Module):
     
     def __init__(self, config, model_path):
         super().__init__()
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        
+        # Try to load tokenizer with proper error handling
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        except (ValueError, TypeError, OSError) as e:
+            # If tokenizer loading fails, provide helpful error message and fallback
+            if "not a string" in str(e) or "vocab_file" in str(e):
+                raise ValueError(
+                    f"Failed to load tokenizer from '{model_path}'. "
+                    f"The model directory appears to be missing required tokenizer files "
+                    f"(e.g., vocab file, tokenizer config). "
+                    f"Please ensure the model was saved correctly with all tokenizer files. "
+                    f"Original error: {e}"
+                ) from e
+            elif "Unrecognized model" in str(e):
+                raise ValueError(
+                    f"Model path '{model_path}' does not contain a valid model configuration. "
+                    f"Please ensure the directory contains config.json and other required model files. "
+                    f"Original error: {e}"
+                ) from e
+            else:
+                # Re-raise other tokenizer errors with context
+                raise ValueError(
+                    f"Failed to load tokenizer from '{model_path}': {e}"
+                ) from e
+        
         self.albert = ALBERT(config)
 
-        state_dict = torch.load(os.path.join(model_path, "pytorch_model.bin"), map_location="cpu")
-        self.albert.load_state_dict(state_dict)
+        # Load model state with proper error handling
+        model_file = os.path.join(model_path, "pytorch_model.bin")
+        if not os.path.exists(model_file):
+            raise FileNotFoundError(
+                f"Model file '{model_file}' not found. "
+                f"Please ensure the model was saved correctly and the path '{model_path}' "
+                f"contains the required pytorch_model.bin file."
+            )
+        
+        try:
+            state_dict = torch.load(model_file, map_location="cpu")
+            self.albert.load_state_dict(state_dict)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to load model weights from '{model_file}'. "
+                f"The file may be corrupted or incompatible with the current model architecture. "
+                f"Original error: {e}"
+            ) from e
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.albert.to(self.device)

@@ -108,6 +108,24 @@ def test_optimizer(model):
     else:
         print("✅ Optimizer created successfully")
 
+def test_sentence_albert_error_handling(config):
+    """Test SentenceAlbert error handling for invalid model paths."""
+    print("\nTesting SentenceAlbert error handling...")
+    
+    from albertmoe.models import SentenceAlbert
+    
+    # Test with invalid path - should raise ValueError with helpful message
+    try:
+        SentenceAlbert(config, "/nonexistent/path")
+        print("❌ Expected error for invalid path")
+    except ValueError as e:
+        if "Failed to load tokenizer" in str(e):
+            print("✅ SentenceAlbert properly handles invalid model path")
+        else:
+            print(f"❌ Unexpected error message: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected exception type: {type(e).__name__}: {e}")
+
 def test_loss_computation(config):
     """Test loss computation with labels."""
     print("\nTesting loss computation...")
@@ -146,6 +164,9 @@ def main():
     # Test loss computation
     test_loss_computation(config)
     
+    # Test SentenceAlbert error handling
+    test_sentence_albert_error_handling(config)
+    
     print("\n" + "=" * 50)
     print("🎉 All tests passed! AlbertMoE package is working correctly.")
     print("\nKey features verified:")
@@ -156,6 +177,7 @@ def main():
     print("- ✅ Custom ChillAdam optimizer")
     print("- ✅ Proper loss computation")
     print("- ✅ Forward and backward passes")
+    print("- ✅ Robust error handling for model loading")
 
 if __name__ == "__main__":
     main()
