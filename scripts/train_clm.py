@@ -119,6 +119,40 @@ def main():
         )
         print("✅ Evaluation completed!")
     
+    if args.mode == "serve":
+        # Serving mode
+        print("🚀 Starting CLM serving mode...")
+        
+        # Create trainer for serving
+        trainer = CLMTrainer.create_trainer(args)
+        
+        # Load the trained model
+        if not trainer.load_for_serving(args.model_path):
+            print("❌ Failed to load model for serving. Please check the model path.")
+            return
+        
+        if args.interactive:
+            # Interactive serving
+            trainer.serve_interactive(args)
+        else:
+            # Single prediction mode
+            if args.input_text:
+                print(f"🎯 Input: {args.input_text}")
+                print("🔄 Generating...")
+                
+                generated = trainer.generate_text(
+                    args.input_text,
+                    max_length=args.gen_max_length,
+                    temperature=args.temperature,
+                    top_k=args.top_k,
+                    top_p=args.top_p
+                )
+                
+                print(f"📝 Generated text:\n{generated}")
+            else:
+                print("⚠️  Please provide --input_text for non-interactive serving mode.")
+                print("💡 Or use --interactive flag for interactive mode.")
+    
     print("\n🎉 SCRIPT EXECUTION COMPLETE")
 
 
