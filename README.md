@@ -44,6 +44,7 @@ python scripts/train_clm.py \
     --batch_size 8 \
     --hidden_size 768 \
     --num_experts 8 \
+    --max_position_embeddings 512 \
     --use_wandb
 ```
 
@@ -58,6 +59,7 @@ python scripts/train_clm.py \
     --batch_size 8 \
     --hidden_size 768 \
     --num_experts 8 \
+    --max_position_embeddings 512 \
     --push_to_hub username/my-albert-moe \
     --hub_token your_hf_token \
     --use_wandb
@@ -74,6 +76,7 @@ python scripts/train_mlm.py \
     --batch_size 8 \
     --hidden_size 768 \
     --num_experts 8 \
+    --max_position_embeddings 512 \
     --use_wandb
 ```
 
@@ -92,6 +95,7 @@ python scripts/train_clm.py \
     --batch_size 8 \
     --hidden_size 768 \
     --num_experts 8 \
+    --max_position_embeddings 512 \
     --use_wandb
 ```
 
@@ -104,7 +108,8 @@ python scripts/train_clm.py \
     --text_column context \
     --streaming \
     --max_samples 10000 \
-    --batch_size 4
+    --batch_size 4 \
+    --max_position_embeddings 512
 ```
 
 **Benefits of Streaming:**
@@ -209,6 +214,7 @@ config = AlbertMoEConfig(
 | `--num_epochs` | Number of training epochs | 3 |
 | `--hidden_size` | Model hidden size | 768 |
 | `--num_experts` | Number of MoE experts | 8 |
+| `--max_position_embeddings` | Maximum sequence length | 512 |
 | `--streaming` | Enable dataset streaming for large datasets | False |
 | `--max_samples` | Maximum number of samples to use from dataset | None |
 | `--text_column` | Name of the text column in the dataset | text |
@@ -230,12 +236,14 @@ Train and automatically upload to Hub:
 python scripts/train_clm.py \
     --push_to_hub username/my-albert-clm \
     --hub_token your_hf_token \
+    --max_position_embeddings 512 \
     --hub_private  # Optional: create private repo
 
 # MLM training with Hub upload  
 python scripts/train_mlm.py \
     --push_to_hub username/my-albert-mlm \
-    --hub_token your_hf_token
+    --hub_token your_hf_token \
+    --max_position_embeddings 512
 ```
 
 ### Programmatic Hub Integration
@@ -291,13 +299,13 @@ The package includes comprehensive evaluation capabilities using MTEB (Massive T
 
 ```bash
 # Evaluate on basic tasks
-python scripts/train_clm.py --mode evaluate --eval_tasks basic
+python scripts/train_clm.py --mode evaluate --eval_tasks basic --max_position_embeddings 512
 
 # Evaluate on comprehensive benchmark
-python scripts/train_clm.py --mode evaluate --eval_tasks comprehensive
+python scripts/train_clm.py --mode evaluate --eval_tasks comprehensive --max_position_embeddings 512
 
 # Custom tasks
-python scripts/train_clm.py --mode evaluate --custom_tasks STSBenchmark SummEval
+python scripts/train_clm.py --mode evaluate --custom_tasks STSBenchmark SummEval --max_position_embeddings 512
 ```
 
 ## 📊 Monitoring
