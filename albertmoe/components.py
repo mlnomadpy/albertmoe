@@ -216,7 +216,7 @@ class AlbertEmbeddings(nn.Module):
         
         # Project from embedding_size to hidden_size
         self.embedding_hidden_mapping_in = nn.Linear(config.embedding_size, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.norm = nn.RMSNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         
         # Positional embeddings - only for absolute positioning
@@ -248,7 +248,7 @@ class AlbertEmbeddings(nn.Module):
             position_embeddings = self.position_embeddings(position_ids)
             projected_embeddings = projected_embeddings + position_embeddings
         
-        embeddings = self.LayerNorm(projected_embeddings)
+        embeddings = self.norm(projected_embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
 
@@ -309,8 +309,8 @@ class AlbertLayer(nn.Module):
         super().__init__()
         self.attention = MultiHeadAttention(config)
         self.ffn = MoE(config)
-        self.norm1 = nn.LayerNorm(config.hidden_size)
-        self.norm2 = nn.LayerNorm(config.hidden_size)
+        self.norm1 = nn.RMSNorm(config.hidden_size)
+        self.norm2 = nn.RMSNorm(config.hidden_size)
         self.dropout1 = nn.Dropout(config.hidden_dropout_prob)
         self.dropout2 = nn.Dropout(config.hidden_dropout_prob)
 

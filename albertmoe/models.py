@@ -37,7 +37,7 @@ class AlbertForCausalLM(nn.Module):
         self.albert = ALBERT(config)
         self.lm_head_transform = nn.Linear(config.hidden_size, config.embedding_size, bias=False)
         self.gelu = nn.GELU()
-        self.norm = nn.LayerNorm(config.embedding_size)
+        self.norm = nn.RMSNorm(config.embedding_size)
         self.lm_head_decoder = nn.Linear(config.embedding_size, config.vocab_size, bias=False)
         self.config = config
 
@@ -70,7 +70,7 @@ class AlbertForMaskedLM(nn.Module):
         self.albert = ALBERT(config)
         self.mlm_head_transform = nn.Linear(config.hidden_size, config.embedding_size, bias=False)
         self.gelu = nn.GELU()
-        self.norm = nn.LayerNorm(config.embedding_size)
+        self.norm = nn.RMSNorm(config.embedding_size)
         self.mlm_head_decoder = nn.Linear(config.embedding_size, config.vocab_size, bias=False)
         self.config = config
 

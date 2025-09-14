@@ -193,7 +193,7 @@ class AlbertEmbeddings(nn.Module):
         self.token_embeddings = nn.Embedding(config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id)
         self.segment_embeddings = nn.Embedding(config.type_vocab_size, config.embedding_size)
         self.embedding_hidden_mapping_in = nn.Linear(config.embedding_size, config.hidden_size)
-        self.norm = nn.LayerNorm(config.hidden_size)
+        self.norm = nn.RMSNorm(config.hidden_size)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, input_ids, token_type_ids=None):
@@ -248,8 +248,8 @@ class AlbertLayer(nn.Module):
         super().__init__()
         self.attention = MultiHeadAttention(config)
         self.ffn = MoE(config)
-        self.norm1 = nn.LayerNorm(config.hidden_size)
-        self.norm2 = nn.LayerNorm(config.hidden_size)
+        self.norm1 = nn.RMSNorm(config.hidden_size)
+        self.norm2 = nn.RMSNorm(config.hidden_size)
         self.dropout1 = nn.Dropout(config.hidden_dropout_prob)
         self.dropout2 = nn.Dropout(config.hidden_dropout_prob)
 
@@ -281,7 +281,7 @@ class AlbertForMaskedLM(nn.Module):
         self.albert = ALBERT(config)
         self.mlm_head_transform = nn.Linear(config.hidden_size, config.embedding_size, bias=False)
         self.gelu = nn.GELU()
-        self.norm = nn.LayerNorm(config.embedding_size)
+        self.norm = nn.RMSNorm(config.embedding_size)
         self.mlm_head_decoder = nn.Linear(config.embedding_size, config.vocab_size, bias=False)
         self.config = config
 
