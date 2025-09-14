@@ -22,7 +22,10 @@ def train_mlm_model(trainer, args):
         args.dataset, 
         args.dataset_config, 
         args.dataset_split,
-        args.max_length
+        args.max_length,
+        args.streaming,
+        args.max_samples,
+        args.text_column
     )
     
     # Create data loader
@@ -30,7 +33,7 @@ def train_mlm_model(trainer, args):
     dataloader = DataLoader(
         tokenized_dataset,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=not args.streaming,  # Don't shuffle streaming datasets
         collate_fn=data_collator
     )
     
@@ -46,7 +49,13 @@ def train_mlm_model(trainer, args):
     for epoch in range(args.num_epochs):
         print(f"\n📚 Epoch {epoch + 1}/{args.num_epochs}")
         
-        losses = trainer.train_epoch(dataloader, args.use_wandb)
+        losses = trainer.train_epoch(
+            dataloader, 
+            args.use_wandb, 
+            args.streaming, 
+            args.max_samples, 
+            args.batch_size
+        )
         
         print(f"Average losses - Total: {losses['total_loss']:.4f}, "
               f"MLM: {losses['mlm_loss']:.4f}, "
