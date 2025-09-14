@@ -292,6 +292,28 @@ class MultiHeadAttention(nn.Module):
         scores = torch.matmul(q, k.transpose(-2, -1)) / scale
 
         if attention_mask is not None:
+            # Convert attention_mask to the correct format for additive attention
+            # attention_mask comes as [batch_size, mask_seq_len] with 1s for valid tokens, 0s for padding
+            # We need to convert to [batch_size, 1, 1, seq_len] with 0s for valid, large negative for padding
+            
+            mask_batch_size, mask_seq_len = attention_mask.shape
+            current_seq_len = seq_len
+            
+            # Handle case where attention mask length doesn't match current sequence length
+            if mask_seq_len != current_seq_len:
+                if mask_seq_len < current_seq_len:
+                    # Pad attention mask with zeros (treated as padding)
+                    padding_length = current_seq_len - mask_seq_len
+                    padding = torch.zeros(mask_batch_size, padding_length, device=attention_mask.device, dtype=attention_mask.dtype)
+                    attention_mask = torch.cat([attention_mask, padding], dim=1)
+                else:
+                    # Truncate attention mask to match sequence length
+                    attention_mask = attention_mask[:, :current_seq_len]
+            
+            # Convert 1s to 0s and 0s to large negative values
+            attention_mask = (1.0 - attention_mask) * -10000.0
+            # Reshape to broadcast: [batch_size, seq_len] -> [batch_size, 1, 1, seq_len]
+            attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
             scores = scores + attention_mask
 
         attention_weights = F.softmax(scores, dim=-1)
