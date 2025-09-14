@@ -36,6 +36,7 @@ pip install -e .
 ### Training a Causal Language Model (CLM)
 
 ```bash
+# Default training with Rotary Position Embeddings (RoPE)
 python scripts/train_clm.py \
     --mode pretrain \
     --dataset wikitext \
@@ -44,6 +45,22 @@ python scripts/train_clm.py \
     --batch_size 8 \
     --hidden_size 768 \
     --num_experts 8 \
+    --use_wandb
+```
+
+### Training with Normal Positional Embeddings
+
+```bash
+# Training with normal/absolute positional embeddings instead of RoPE
+python scripts/train_clm.py \
+    --mode pretrain \
+    --dataset wikitext \
+    --dataset_config wikitext-2-raw-v1 \
+    --num_epochs 3 \
+    --batch_size 8 \
+    --hidden_size 768 \
+    --num_experts 8 \
+    --no_rotary \
     --use_wandb
 ```
 
@@ -82,13 +99,24 @@ python scripts/train_mlm.py \
 ```python
 from albertmoe import AlbertMoEConfig, AlbertForCausalLM, ChillAdam, push_to_hub
 
-# Create configuration
+# Create configuration with Rotary Position Embeddings (default)
 config = AlbertMoEConfig(
     vocab_size=30000,
     hidden_size=768,
     num_hidden_layers=12,
     num_experts=8,
-    top_k_experts=2
+    top_k_experts=2,
+    use_rotary=True  # Use RoPE (default)
+)
+
+# Or create configuration with normal positional embeddings
+config_normal = AlbertMoEConfig(
+    vocab_size=30000,
+    hidden_size=768,
+    num_hidden_layers=12,
+    num_experts=8,
+    top_k_experts=2,
+    use_rotary=False  # Use normal positional embeddings
 )
 
 # Create model
@@ -173,6 +201,8 @@ config = AlbertMoEConfig(
 | `--num_epochs` | Number of training epochs | 3 |
 | `--hidden_size` | Model hidden size | 768 |
 | `--num_experts` | Number of MoE experts | 8 |
+| `--use_rotary` | Use Rotary Position Embeddings (RoPE) | True |
+| `--no_rotary` | Disable RoPE, use normal positional embeddings | False |
 | `--use_wandb` | Enable Weights & Biases logging | False |
 | `--push_to_hub` | Hub repository ID (e.g., 'username/model-name') | None |
 | `--hub_token` | Hugging Face authentication token | None |

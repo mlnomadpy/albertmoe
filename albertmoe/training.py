@@ -178,6 +178,7 @@ class CLMTrainer(BaseTrainer):
             max_position_embeddings=args.max_position_embeddings,
             aux_loss_coefficient=args.aux_loss_coefficient,
             top_k_experts=args.top_k_experts,
+            use_rotary=args.use_rotary,
         )
         
         # Create model
@@ -225,6 +226,7 @@ class MLMTrainer(BaseTrainer):
             max_position_embeddings=args.max_position_embeddings,
             aux_loss_coefficient=args.aux_loss_coefficient,
             top_k_experts=args.top_k_experts,
+            use_rotary=args.use_rotary,
         )
         
         # Create model
@@ -278,6 +280,10 @@ def get_common_parser():
     model_group.add_argument("--top_k_experts", type=int, default=2)
     model_group.add_argument("--max_position_embeddings", type=int, default=512)
     model_group.add_argument("--aux_loss_coefficient", type=float, default=0.01)
+    model_group.add_argument("--use_rotary", action="store_true", default=True, 
+                            help="Use Rotary Position Embeddings (RoPE) instead of normal positional embeddings")
+    model_group.add_argument("--no_rotary", dest="use_rotary", action="store_false",
+                            help="Disable Rotary Position Embeddings and use normal positional embeddings")
 
     # Dataset configuration
     dataset_group = parser.add_argument_group('Dataset Configuration')

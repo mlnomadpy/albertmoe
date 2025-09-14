@@ -107,6 +107,11 @@ class AlbertEmbeddings(nn.Module):
         self.word_embeddings = nn.Embedding(config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.embedding_size)
         
+        # Add positional embeddings only if not using rotary embeddings
+        self.use_rotary = getattr(config, 'use_rotary', True)
+        if not self.use_rotary:
+            self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.embedding_size)
+        
         # Project from embedding_size to hidden_size
         self.embedding_hidden_mapping_in = nn.Linear(config.embedding_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -125,6 +130,13 @@ class AlbertEmbeddings(nn.Module):
         
         embeddings = inputs_embeds + token_type_embeddings
         
+        # Add positional embeddings if not using rotary embeddings
+        if not self.use_rotary:
+            position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
+            position_ids = position_ids.unsqueeze(0).expand(input_ids.shape[0], -1)
+            position_embeddings = self.position_embeddings(position_ids)
+            embeddings = embeddings + position_embeddings
+        
         # Project to hidden size
         projected_embeddings = self.embedding_hidden_mapping_in(embeddings)
         embeddings = self.LayerNorm(projected_embeddings)
@@ -141,7 +153,11 @@ class MultiHeadAttention(nn.Module):
         self.qkv_layer = nn.Linear(config.hidden_size, 3 * config.hidden_size, bias=False)
         self.output_proj = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
-        self.rotary_emb = RotaryEmbedding(self.head_dim, config.max_position_embeddings)
+        
+        # Only create rotary embeddings if use_rotary is True
+        self.use_rotary = getattr(config, 'use_rotary', True)
+        if self.use_rotary:
+            self.rotary_emb = RotaryEmbedding(self.head_dim, config.max_position_embeddings)
 
     def forward(self, x, attention_mask=None):
         batch_size, seq_len, hidden_size = x.size()
@@ -149,8 +165,10 @@ class MultiHeadAttention(nn.Module):
         qkv = qkv.reshape(batch_size, seq_len, self.num_heads, 3 * self.head_dim).permute(0, 2, 1, 3)
         q, k, v = qkv.chunk(3, dim=-1)
         
-        cos, sin = self.rotary_emb(v)
-        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+        # Apply rotary embeddings only if use_rotary is True
+        if self.use_rotary:
+            cos, sin = self.rotary_emb(v)
+            q, k = apply_rotary_pos_emb(q, k, cos, sin)
         
         scale = (self.head_dim ** 0.5)
         scores = torch.matmul(q, k.transpose(-2, -1)) / scale
