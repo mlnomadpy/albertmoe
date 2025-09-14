@@ -25,7 +25,7 @@ class AlbertMoEConfig:
     initializer_range: float = 0.02
     layer_norm_eps: float = 1e-12
     pad_token_id: int = 0
-    position_embedding_type: str = "absolute"
+    position_embedding_type: str = "rope"  # "rope" or "absolute"
     
     # MoE specific
     num_experts: int = 8
@@ -33,13 +33,32 @@ class AlbertMoEConfig:
     top_k_experts: int = 2
     aux_loss_coefficient: float = 0.01
     
-    # Training specific  
+    # RoPE specific (when position_embedding_type="rope")
+    rope_base: int = 10000
+    rope_max_seq_len: int = 4096
+    
+    # Training specific (deprecated: use position_embedding_type instead)
     use_rotary: bool = True
     rotary_dim: Optional[int] = None
     
     def __post_init__(self):
+        # Backward compatibility: if use_rotary is False, use absolute positioning
+        if not self.use_rotary and self.position_embedding_type == "rope":
+            self.position_embedding_type = "absolute"
+        # Forward compatibility: if position_embedding_type is rope, ensure use_rotary is True
+        elif self.position_embedding_type == "rope":
+            self.use_rotary = True
+            
         if self.rotary_dim is None:
             self.rotary_dim = self.hidden_size // self.num_attention_heads
         # Ensure rotary_dim is even for proper rotation
         if self.rotary_dim % 2 != 0:
             self.rotary_dim = self.rotary_dim - 1
+            
+        # Validate position embedding type
+        if self.position_embedding_type not in ["rope", "absolute"]:
+            raise ValueError(f"position_embedding_type must be 'rope' or 'absolute', got {self.position_embedding_type}")
+            
+        # Set rope_max_seq_len to max_position_embeddings if not explicitly set
+        if self.rope_max_seq_len == 4096 and hasattr(self, 'max_position_embeddings'):
+            self.rope_max_seq_len = max(self.max_position_embeddings, 4096)

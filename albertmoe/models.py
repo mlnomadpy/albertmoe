@@ -20,11 +20,11 @@ class ALBERT(nn.Module):
         self.embeddings = AlbertEmbeddings(config)
         self.shared_layer = AlbertLayer(config)
 
-    def forward(self, input_ids, attention_mask=None, token_type_ids=None):
-        x = self.embeddings(input_ids, token_type_ids)
+    def forward(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None):
+        x = self.embeddings(input_ids, token_type_ids, position_ids)
         total_aux_loss = 0.0
         for _ in range(self.config.num_hidden_layers):
-            x, aux_loss = self.shared_layer(x, attention_mask)
+            x, aux_loss = self.shared_layer(x, attention_mask, position_ids)
             total_aux_loss += aux_loss
         return x, total_aux_loss / self.config.num_hidden_layers
 
@@ -41,8 +41,8 @@ class AlbertForCausalLM(nn.Module):
         self.lm_head_decoder = nn.Linear(config.embedding_size, config.vocab_size, bias=False)
         self.config = config
 
-    def forward(self, input_ids, attention_mask=None, token_type_ids=None, labels=None):
-        hidden_states, aux_loss = self.albert(input_ids, attention_mask, token_type_ids)
+    def forward(self, input_ids, attention_mask=None, token_type_ids=None, labels=None, position_ids=None):
+        hidden_states, aux_loss = self.albert(input_ids, attention_mask, token_type_ids, position_ids)
         transformed_states = self.norm(self.gelu(self.lm_head_transform(hidden_states)))
         logits = self.lm_head_decoder(transformed_states)
         
@@ -74,8 +74,8 @@ class AlbertForMaskedLM(nn.Module):
         self.mlm_head_decoder = nn.Linear(config.embedding_size, config.vocab_size, bias=False)
         self.config = config
 
-    def forward(self, input_ids, attention_mask=None, token_type_ids=None, labels=None):
-        hidden_states, aux_loss = self.albert(input_ids, attention_mask, token_type_ids)
+    def forward(self, input_ids, attention_mask=None, token_type_ids=None, labels=None, position_ids=None):
+        hidden_states, aux_loss = self.albert(input_ids, attention_mask, token_type_ids, position_ids)
         transformed_states = self.norm(self.gelu(self.mlm_head_transform(hidden_states)))
         logits = self.mlm_head_decoder(transformed_states)
 

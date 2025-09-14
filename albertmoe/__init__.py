@@ -13,7 +13,11 @@ from .models import AlbertForCausalLM, AlbertForMaskedLM, ALBERT, SentenceAlbert
 from .optimizers import ChillAdam
 from .training import CLMTrainer, MLMTrainer, BaseTrainer
 from .config import AlbertMoEConfig
-from .components import RotaryEmbedding, MoE, Expert, AlbertEmbeddings, MultiHeadAttention, AlbertLayer
+from .components import (
+    RotaryEmbedding, MoE, Expert, AlbertEmbeddings, MultiHeadAttention, AlbertLayer,
+    TorchTuneRotaryEmbedding, AbsolutePositionalEmbedding, AbstractPositionalEmbedding,
+    create_positional_embedding
+)
 from .evaluation import MTEBEvaluator, evaluate_model
 from .hub_utils import HubManager, push_to_hub
 
@@ -28,6 +32,10 @@ __all__ = [
     "BaseTrainer",
     "AlbertMoEConfig",
     "RotaryEmbedding",
+    "TorchTuneRotaryEmbedding",
+    "AbsolutePositionalEmbedding",
+    "AbstractPositionalEmbedding",
+    "create_positional_embedding",
     "MoE",
     "Expert",
     "AlbertEmbeddings",
