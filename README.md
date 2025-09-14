@@ -207,7 +207,7 @@ config = AlbertMoEConfig(
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `--mode` | Training mode: pretrain, evaluate, all | all |
+| `--mode` | Training mode: pretrain, evaluate, serve, all | all |
 | `--task_type` | Task type: clm, mlm | Required |
 | `--dataset` | Dataset name | wikitext |
 | `--batch_size` | Training batch size | 8 |
@@ -222,6 +222,93 @@ config = AlbertMoEConfig(
 | `--push_to_hub` | Hub repository ID (e.g., 'username/model-name') | None |
 | `--hub_token` | Hugging Face authentication token | None |
 | `--hub_private` | Create private repository on Hub | False |
+
+## 🚀 Serving Mode for Inference
+
+AlbertMoE now supports a dedicated serving mode for using pretrained models for inference without requiring the full training setup.
+
+### CLM (Causal Language Model) Serving
+
+Use your trained CLM models for text generation and completion:
+
+```bash
+# Interactive text generation
+python scripts/train_clm.py \
+    --mode serve \
+    --model_path ./my_clm_model \
+    --interactive
+
+# Single text completion
+python scripts/train_clm.py \
+    --mode serve \
+    --model_path ./my_clm_model \
+    --input_text "Once upon a time" \
+    --gen_max_length 100 \
+    --temperature 0.8 \
+    --top_k 50 \
+    --top_p 0.95
+```
+
+### MLM (Masked Language Model) Serving
+
+Use your trained MLM models for masked token prediction:
+
+```bash
+# Interactive masked token prediction
+python scripts/train_mlm.py \
+    --mode serve \
+    --model_path ./my_mlm_model \
+    --interactive
+
+# Single masked token prediction
+python scripts/train_mlm.py \
+    --mode serve \
+    --model_path ./my_mlm_model \
+    --input_text "The weather today is [MASK] and [MASK]."
+```
+
+### Serving Configuration Options
+
+| Argument | Description | Default | Task |
+|----------|-------------|---------|------|
+| `--interactive` | Enable interactive serving mode | False | Both |
+| `--input_text` | Input text for non-interactive mode | None | Both |
+| `--gen_max_length` | Maximum generation length | 100 | CLM |
+| `--temperature` | Sampling temperature | 1.0 | CLM |
+| `--top_k` | Top-k sampling | 50 | CLM |
+| `--top_p` | Nucleus sampling threshold | 0.95 | CLM |
+
+### Serving Mode Features
+
+**CLM Serving:**
+- 🎯 **Text Generation**: Complete text given a prompt
+- ⚙️ **Configurable Sampling**: Temperature, top-k, top-p parameters
+- 🔄 **Interactive Mode**: Continuous prompt-response interface
+- 📝 **Single Prediction**: One-time generation with `--input_text`
+
+**MLM Serving:**
+- 🎭 **Masked Token Prediction**: Predict `[MASK]` tokens in sentences
+- 📊 **Top-K Predictions**: Multiple candidates with probability scores
+- 🔄 **Interactive Mode**: Continuous masked text prediction
+- 📝 **Single Prediction**: One-time prediction with `--input_text`
+
+### Example Workflow
+
+```bash
+# 1. Train a model
+python scripts/train_clm.py --mode pretrain --num_epochs 3
+
+# 2. Serve the trained model interactively
+python scripts/train_clm.py --mode serve \
+    --model_path ./albert_from_scratch_output \
+    --interactive
+
+# 3. Or use for single predictions
+python scripts/train_clm.py --mode serve \
+    --model_path ./albert_from_scratch_output \
+    --input_text "The future of AI is" \
+    --gen_max_length 50
+```
 
 ## 🤗 Hugging Face Hub Integration
 
