@@ -15,6 +15,7 @@ from .training import CLMTrainer, MLMTrainer, BaseTrainer
 from .config import AlbertMoEConfig
 from .components import RotaryEmbedding, MoE, Expert, AlbertEmbeddings, MultiHeadAttention, AlbertLayer
 from .evaluation import MTEBEvaluator, evaluate_model
+from .hub_utils import HubManager, push_to_hub
 
 __all__ = [
     "AlbertForCausalLM",
@@ -34,4 +35,6 @@ __all__ = [
     "AlbertLayer",
     "MTEBEvaluator",
     "evaluate_model",
+    "HubManager",
+    "push_to_hub",
 ]
