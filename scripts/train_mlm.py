@@ -57,9 +57,18 @@ def train_mlm_model(trainer, args):
             args.batch_size
         )
         
-        print(f"Average losses - Total: {losses['total_loss']:.4f}, "
-              f"MLM: {losses['mlm_loss']:.4f}, "
-              f"Aux: {losses['aux_loss']:.4f}")
+        # Format losses, handling None values gracefully
+        total_loss = losses['total_loss']
+        mlm_loss = losses['mlm_loss']  
+        aux_loss = losses['aux_loss']
+        
+        total_str = f"{total_loss:.4f}" if total_loss is not None else "N/A"
+        mlm_str = f"{mlm_loss:.4f}" if mlm_loss is not None else "N/A"
+        aux_str = f"{aux_loss:.4f}" if aux_loss is not None else "N/A"
+        
+        print(f"Average losses - Total: {total_str}, "
+              f"MLM: {mlm_str}, "
+              f"Aux: {aux_str}")
         
         # Save model
         if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
