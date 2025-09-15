@@ -94,7 +94,10 @@ def train_clm_model(trainer, args):
 
 def main():
     parser = get_common_parser()
-    args = parser.parse_args()
+    # Strip whitespace from arguments to handle cases like " --streaming"
+    import sys
+    cleaned_argv = [arg.strip() for arg in sys.argv[1:]]
+    args = parser.parse_args(cleaned_argv)
     
     # Ensure task type is CLM
     args.task_type = "clm"
